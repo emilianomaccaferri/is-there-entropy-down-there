@@ -41,19 +41,16 @@ static inline unsigned long long int read_tsc(void){
 	unsigned long long int cpu_val = 0;
 	#if defined(__aarch64__) || defined(_M_ARM64)
 		//  we are on arm64
-		// https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git/tree/arch/arm/include/asm/arch_timer.h?id=082471a8efe1a91d4e44abec202d9e3067dcec91#n34
-		// we access the VIRTUAL (v stands for virtual) timer
-		asm volatile ("msr cntv_ctl_el0, %0": "=r" (cpu_val));
+		asm volatile ("mrs %0, PMCCNTR_EL0": "=r" (cpu_val));
 	#elif defined(__x86_64__) || defined(_M_X64)
 		// we are on x86_64
 		asm volatile("RDTSC\n\t" \
 		"SHL $0x20, %%rdx\n\t" \
 		"OR %%rax, %%rdx\n\t" \
 		"MOV %%rdx, %0\n\t": "=r" (cpu_val)::"%rax", "%rdx");
-	
-	// #else
-		// how to handle err?
 	#endif
+	
+	pr_info("test: %llu", cpu_val);
 
 	return cpu_val;
 }
