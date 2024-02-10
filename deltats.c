@@ -41,7 +41,7 @@ static inline unsigned long long int read_tsc(void){
 	unsigned long long int cpu_val = 0;
 	#if defined(__aarch64__) || defined(_M_ARM64)
 		//  we are on arm64
-		asm volatile ("mrs %0, PMCCNTR_EL0": "=r" (cpu_val));
+		asm volatile ("mrs %0, cntpct_el0": "=r" (cpu_val));
 	#elif defined(__x86_64__) || defined(_M_X64)
 		// we are on x86_64
 		asm volatile("RDTSC\n\t" \
@@ -57,7 +57,7 @@ static inline unsigned long long int read_tsc(void){
 
 static struct kobject *mymodule;
 
-static unsigned long sleepns = 1000;
+static unsigned long sleepns = 1000000; // 1ms of delay
 static unsigned long long int lastdelta = 0;
 static unsigned long long int ticks;
 
@@ -86,8 +86,17 @@ static ssize_t lastdelta_show(struct kobject *kobj, struct kobj_attribute *attr,
 }
 
 static ssize_t ticks_show(struct kobject *kobj, struct kobj_attribute *attr, char *buf) {
-	if (sleepns != 0)
-		ndelay(sleepns);
+	// aggiungere calcolo last_delta anche qua
+	// l'ndelay dovrebbe essere sempre di lastdelta quando lastdelta è > 0
+	
+	if (sleepns != 0){ 
+		// more noise is introduced by sleeping a "ticks" amount of time 
+		if(ticks > 0){
+			ndelay(lastdelta); 
+		}else{
+			ndelay(sleepns); 
+		}
+	}
 	ticks = read_tsc();
 	return sprintf(buf, "%llu\n", ticks);
 }
@@ -98,6 +107,7 @@ static struct kobj_attribute ticks_attribute = __ATTR(ticks, 0444, ticks_show, N
 
 static int __init mymodule_init(void){
 	int error = 0;
+
 	pr_info("deltats: initialized\n");
 	mymodule = kobject_create_and_add("deltats", kernel_kobj);
 	if (!mymodule) return -ENOMEM;
