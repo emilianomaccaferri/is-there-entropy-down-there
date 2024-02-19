@@ -135,17 +135,25 @@ u32 arch_timer_reg_read_cp15(int access, enum arch_timer_reg reg)
 	BUG();
 }
 static inline void try_timer_kh(void){
-	
-	int times = atomic_read(&GLOBAL_TIMES);
+	// we want to collect as many samples as we want in the form
+	// of 32-bit integers.
+	// we put the result of our delta inside a "seed" variable
+	// that gets re-initialized every time we reached the size of an integer variable (every "8th" call we reset the seed).
+	// before being re-initialized, a copy of the seed is stored inside the "seeds" array, which will be analyzed once the kernel has booted 
+
+	int global_times = atomic_read(&GLOBAL_TIMES);
+	int times = global_times % 8; // "% 8" because we want to fill a 32-bit seed. Since we only take 4 bits out of the delta each time, we need 8 bits to fill an integer!
 	unsigned long long int timer_val = get_tsc();
 	long long int last_delta = atomic64_read(&LAST_DELTA);
 	long long int last_timestamp = atomic64_read(&LAST_TIMESTAMP);
+	int index = atomic_read(&SEEDS_INDEX);
 
-	if(times >= 8) return;
+	if(times >= 8) return; // this should never pass of course...
+	if(index >= 20) return; // we want to collect at max 20 seeds (heuristic during boot time)
 
 	if(last_timestamp == -1){
 		// this is the first time this function has been called,
-		// so we need to initialize the last_timestamp
+		// so we need to initialize last_timestamp
 		atomic64_set(&LAST_TIMESTAMP, timer_val);
 	}else{
 		// last_timestamp is already initialized
@@ -154,17 +162,36 @@ static inline void try_timer_kh(void){
 
 		// and begin checking our stuff!
 		if(last_delta > 1000){
-			// every 1000 nanosecs we do this thing of ours
+			// every 1000 nanosecs we do this stuff
 			// we need to take the last 4 bits of our delta and put it inside the seed
 			long long int seed = atomic64_read(&SEED);
 			int last_bits = last_delta & 0xf; // mask it
-			// since it's a 32 bit integer, we need to collect 8 deltas
-			if(times < 8){
-				seed += last_bits << (times * 4);
-				atomic64_set(&SEED, seed);
+			// since it's a 32 bit integer, we need to collect 8 deltas (per seed)
+			
+			if(times % 8 == 0 && global_times > 0){
+				
+				// this means we have reached the "end" of the seed (we collected 8 samples, so we are ready to save the seed)
+
+				// we need to store and reset the seed, since we already 
+				// filled the whole 32 bits
+
+				// store
+				timer_seeds[index] = seed;
+				atomic_inc(&SEEDS_INDEX); // increase the index so we can store another sample later
+
+				// reset
+				seed = 0;
+				atomic64_set(&SEED, 0);
+
 			}
-			atomic_inc(&GLOBAL_TIMES);
+
+			// we populate the seed with the bits we obtained from our delta
+			seed += last_bits << ((times % 8) * 4);
+			atomic64_set(&SEED, seed);
+		
 		}
+
+		atomic_inc(&GLOBAL_TIMES);
 
 	}
 }
