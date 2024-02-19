@@ -32,9 +32,9 @@
 # This script simply repeatedly calls the extractor script and then analyzes the results using the SP800-90B estimators
 #
 
-SYNTAX="$0 <repetitions> <samples> <bits to collect> <output directory>"
+SYNTAX="$0 <repetitions> <samples> <bits to collect> <output directory> <offline>"
 
-if [ $# -ne 4 ]; then
+if [ $# -ne 5 ]; then
     >&2 echo "SYNTAX: $SYNTAX"
     exit 1
 fi
@@ -48,6 +48,7 @@ REPS=$1
 SAMPLES=$2
 BITS=$3
 OUTPUT=$4
+OFFLINE=$5 # "offline" means getting the result from the "/sys/kernel/deltats/seeds" array
 
 # Make sure the kernel module is running
 if [ ! -d "/sys/kernel/deltats" ]; then
@@ -65,26 +66,38 @@ echo "0" > /sys/kernel/deltats/sleepns
 sleep 3
 >&2 echo "Starting entropy collection"
 
-for i in $(seq 1 $REPS); do
-    python3 extractor.py $BITS $SAMPLES 0 $OUTPUT/$i.bin delta
-    >&2 echo "Entropy collected for $i-th sample"
-done
+if [ "$OFFLINE" = true ]; 
+    then
+        python3 extractor.py $BITS $SAMPLES 0 $OUTPUT/offline.bin delta true
+    else 
+        for i in $(seq 1 $REPS); do
+            python3 extractor.py $BITS $SAMPLES 0 $OUTPUT/$i.bin delta false
+            >&2 echo "Entropy collected for $i-th sample"
+        done
+fi 
 
-min=1000
-max=0
-sum=0
-for i in $(seq 1 $REPS); do
-    out=$(./ea_non_iid $OUTPUT/$i.bin $BITS | grep -Po "(?<=min\(H_original, $BITS X H_bitstring\): )[\d\.]+")
-    if [ -z $out ]; then
-        out=0
+if [ "$OFFLINE" = true ];
+    then
+        out=$(./ea_non_iid $OUTPUT/offline.bin 8 | grep -Po "(?<=min\(H_original, 8 X H_bitstring\): )[\d\.]+")
+        echo $out # raw cross entropy
+    else 
+        min=1000
+        max=0
+        sum=0
+        for i in $(seq 1 $REPS); do
+            out=$(./ea_non_iid $OUTPUT/$i.bin $BITS | grep -Po "(?<=min\(H_original, $BITS X H_bitstring\): )[\d\.]+")
+            if [ -z $out ]; then
+                out=0
+            fi
+
+            if (( $(echo "$out < $min" | bc -l) )); then
+                min=$out
+            fi
+            if (( $(echo "$out > $max" | bc -l) )); then
+                max=$out
+            fi
+            sum=$(bc -l <<< $sum+$out)
+        done
+        echo "(min, max, avg) entropy: ($min, $max, $(bc -l <<< $sum/$REPS))"
     fi
 
-    if (( $(echo "$out < $min" | bc -l) )); then
-        min=$out
-    fi
-    if (( $(echo "$out > $max" | bc -l) )); then
-        max=$out
-    fi
-    sum=$(bc -l <<< $sum+$out)
-done
-echo "(min, max, avg) entropy: ($min, $max, $(bc -l <<< $sum/$REPS))"

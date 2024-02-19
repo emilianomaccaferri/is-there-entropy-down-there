@@ -37,11 +37,13 @@
 #include <linux/sysfs.h>
 #include <linux/delay.h>
 
+extern unsigned long long int timer_seeds[20]; // this is a variable that has been exported from the kernel, keep it like this!
+
 static inline unsigned long long int read_tsc(void){
 	unsigned long long int cpu_val = 0;
 	#if defined(__aarch64__) || defined(_M_ARM64)
 		//  we are on arm64
-		asm volatile ("mrs %0, cntpct_el0": "=r" (cpu_val));
+		asm volatile ("mrs %0, cntvct_el0": "=r" (cpu_val));
 	#elif defined(__x86_64__) || defined(_M_X64)
 		// we are on x86_64
 		asm volatile("RDTSC\n\t" \
@@ -49,8 +51,6 @@ static inline unsigned long long int read_tsc(void){
 		"OR %%rax, %%rdx\n\t" \
 		"MOV %%rdx, %0\n\t": "=r" (cpu_val)::"%rax", "%rdx");
 	#endif
-	
-	pr_info("test: %llu", cpu_val);
 
 	return cpu_val;
 }
@@ -91,7 +91,7 @@ static ssize_t ticks_show(struct kobject *kobj, struct kobj_attribute *attr, cha
 	
 	if (sleepns != 0){ 
 		// more noise is introduced by sleeping a "ticks" amount of time 
-		if(ticks > 0){
+		if(lastdelta > 0){
 			ndelay(lastdelta); 
 		}else{
 			ndelay(sleepns); 
@@ -101,9 +101,41 @@ static ssize_t ticks_show(struct kobject *kobj, struct kobj_attribute *attr, cha
 	return sprintf(buf, "%llu\n", ticks);
 }
 
+static ssize_t seeds_show(struct kobject *kobj, struct kobj_attribute *attr, char *buf){
+
+	// the module loads the seeds that have been created at boot (20, for now, can be expanded)
+	// note: the module will see more seeds than the "GOT SEEDS" message at boot time, because
+	// by the time the "GOT SEEDS" message is displayed, the kernel might have generated less than
+	// 20 seeds (which is the maximum number of seeds observed in the start_kernel function)
+
+	return sprintf(buf, "%u, %u, %u, %u, %u, %u, %u, %u, %u, %u, %u, %u, %u, %u, %u, %u, %u, %u, %u, %u\n", 
+		timer_seeds[0], 
+		timer_seeds[1], 
+		timer_seeds[2], 
+		timer_seeds[3], 
+		timer_seeds[4], 
+		timer_seeds[5],
+		timer_seeds[6], 
+		timer_seeds[7], 
+		timer_seeds[8], 
+		timer_seeds[9], 
+		timer_seeds[10], 
+		timer_seeds[11], 
+		timer_seeds[12], 
+		timer_seeds[13],
+		timer_seeds[14], 
+		timer_seeds[15], 
+		timer_seeds[16], 
+		timer_seeds[17], 
+		timer_seeds[18],
+		timer_seeds[19]
+	);
+}
+
 static struct kobj_attribute sleepns_attribute = __ATTR(sleepns, 0660, sleepns_show, (void *)sleepns_store);
 static struct kobj_attribute lastdelta_attribute = __ATTR(lastdelta, 0444, lastdelta_show, NULL);
 static struct kobj_attribute ticks_attribute = __ATTR(ticks, 0444, ticks_show, NULL);
+static struct kobj_attribute seeds_attribute = __ATTR(seeds, 0444, seeds_show, NULL); // this is the interface we will use to get the seeds we obtained at boot
 
 static int __init mymodule_init(void){
 	int error = 0;
@@ -115,6 +147,7 @@ static int __init mymodule_init(void){
 	if ((error = sysfs_create_file(mymodule, &sleepns_attribute.attr))) goto err;
 	if ((error = sysfs_create_file(mymodule, &lastdelta_attribute.attr))) goto err;
 	if ((error = sysfs_create_file(mymodule, &ticks_attribute.attr))) goto err;
+	if ((error = sysfs_create_file(mymodule, &seeds_attribute.attr))) goto err;
 
 err:
 	if (error)

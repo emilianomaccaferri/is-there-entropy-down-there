@@ -34,17 +34,19 @@ import os
 import time
 from math import log2
 
-SYNTAX = f"{sys.argv[0]} <bits_to_extract> <samples> <time_to_sleep_microseconds> <output_filename> <ticks|delta>\n"
+SYNTAX = f"{sys.argv[0]} <bits_to_extract> <samples> <time_to_sleep_microseconds> <output_filename> <ticks|delta> <offline-mode>\n"
 
-if len(sys.argv) != 6:
+if len(sys.argv) != 7:
     sys.stderr.write(SYNTAX)
     sys.exit(1)
 
-maskbits = int(sys.argv[1])    # How many bits should we extract from the number? -1 means all
+offline_mode = sys.argv[6] == "true" # if the script is running in offline mode, the samples must be extracted from the ones collected at boot
+maskbits = -1 if offline_mode is True else int(sys.argv[1])    # How many bits should we extract from the number? -1 means all (we want to get the whole sample if we are running in offline mode)
 samples = int(sys.argv[2])
 usleep = int(sys.argv[3])
 mask = (1<<maskbits) - 1 if maskbits > 0 else -1
 
+print("offline mode:", offline_mode)
 
 f = '/sys/kernel/deltats/ticks'
 bits = 32    # How many decimal digits is the number returned expected to have
@@ -58,21 +60,36 @@ else:
     sys.stderr.write(SYNTAX)
     sys.exit(1)
 
-for _ in range(samples):
-    D = 0
-    lastn = -1
-    for i in range(delta+1):
-        e = os.open(f, os.O_RDONLY)
-        n = os.read(e, 32)
-        n = n.decode("utf-8")
-        n = int(n)
-        if delta and lastn == -1:
-            lastn = n
-        elif delta and lastn > 0:
-            D = n - lastn
-        else:
-            D = n
-        os.close(e)
+if offline_mode is True:
+    timer_ticks_file = open('/sys/kernel/deltats/seeds', "r")
+    boot_samples = timer_ticks_file.read().split(",") # a comma-separated list of integers
+    samples = len(boot_samples) # we want to use the code Gianmarco wrote
+    print(boot_samples)
+
+"""
+    while running in offline mode, the script is "tricked" into thinking that the samples
+    are coming directly from /sys/kernel/deltats/ticks, whereas they are coming from pre-collected
+    samples at boot time.
+    this way we can leverage existing code without polluting results (because i don't fully understand what 
+    kind of sorcery is going on in the code below)
+""" 
+
+for i in range(samples):
+    D = int(boot_samples[i]) if offline_mode is True else 0 # we already have deltas and stuff, we don't want to go through the cycle down below
+    if offline_mode is False:  
+        lastn = -1
+        for i in range(delta+1):
+            e = os.open(f, os.O_RDONLY)
+            n = os.read(e, 32)
+            n = n.decode("utf-8")
+            n = int(n)
+            if delta and lastn == -1:
+                lastn = n
+            elif delta and lastn > 0:
+                D = n - lastn
+            else:
+                D = n
+            os.close(e)
     
     try:
         gg = (int(log2(D & mask)) + 1)
