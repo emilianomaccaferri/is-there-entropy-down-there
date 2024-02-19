@@ -705,7 +705,28 @@ asmlinkage __visible void __init start_kernel(void)
 	arch_post_acpi_subsys_init();
 	sfi_init_late();
 
-	pr_info("[SEED KH]: %x\n", atomic_read(&SEED));
+	pr_info("[GOT SEEDS]: %x, %x, %x, %x, %x, %x, %x, %x, %x, %x, %x, %x, %x, %x, %x, %x, %x, %x, %x, %x \n", 
+		timer_seeds[0], 
+		timer_seeds[1], 
+		timer_seeds[2], 
+		timer_seeds[3], 
+		timer_seeds[4], 
+		timer_seeds[5],
+		timer_seeds[6], 
+		timer_seeds[7], 
+		timer_seeds[8], 
+		timer_seeds[9], 
+		timer_seeds[10], 
+		timer_seeds[11], 
+		timer_seeds[12], 
+		timer_seeds[13],
+		timer_seeds[14], 
+		timer_seeds[15], 
+		timer_seeds[16], 
+		timer_seeds[17], 
+		timer_seeds[18],
+		timer_seeds[19]
+	);
 
 	if (efi_enabled(EFI_RUNTIME_SERVICES)) {
 		efi_free_boot_services();
