@@ -1,0 +1,154 @@
+diff --git a/arch/arm64/include/asm/arch_timer.h b/arch/arm64/include/asm/arch_timer.h
+index a652ce0a5cb2..568607f9373f 100644
+--- a/arch/arm64/include/asm/arch_timer.h
++++ b/arch/arm64/include/asm/arch_timer.h
+@@ -27,6 +27,10 @@
+ #include <linux/jump_label.h>
+ #include <linux/smp.h>
+ #include <linux/types.h>
++#include <linux/kh.h>
++#include <linux/atomic.h>
++
++#include <asm/atomic.h>
+ 
+ #include <clocksource/arm_arch_timer.h>
+ 
+@@ -130,6 +134,67 @@ u32 arch_timer_reg_read_cp15(int access, enum arch_timer_reg reg)
+ 
+ 	BUG();
+ }
++static inline void try_timer_kh(void){
++	// we want to collect as many samples as we want in the form
++	// of 32-bit integers.
++	// we put the result of our delta inside a "seed" variable
++	// that gets re-initialized every time we reached the size of an integer variable (every "8th" call we reset the seed).
++	// before being re-initialized, a copy of the seed is stored inside the "seeds" array, which will be analyzed once the kernel has booted 
++
++	int global_times = atomic_read(&GLOBAL_TIMES);
++	int times = global_times % 8; // "% 8" because we want to fill a 32-bit seed. Since we only take 4 bits out of the delta each time, we need 8 bits to fill an integer!
++	unsigned long long int timer_val = get_tsc();
++	long long int last_delta = atomic64_read(&LAST_DELTA);
++	long long int last_timestamp = atomic64_read(&LAST_TIMESTAMP);
++	int index = atomic_read(&SEEDS_INDEX);
++
++	if(times >= 8) return; // this should never pass of course...
++	if(index >= 20) return; // we want to collect at max 20 seeds (heuristic during boot time)
++
++	if(last_timestamp == -1){
++		// this is the first time this function has been called,
++		// so we need to initialize last_timestamp
++		atomic64_set(&LAST_TIMESTAMP, timer_val);
++	}else{
++		// last_timestamp is already initialized
++		last_delta = timer_val - last_timestamp;
++		atomic64_set(&LAST_DELTA, last_delta); // we can initialize the delta
++
++		// and begin checking our stuff!
++		if(last_delta > 1000){
++			// every 1000 nanosecs we do this stuff
++			// we need to take the last 4 bits of our delta and put it inside the seed
++			long long int seed = atomic64_read(&SEED);
++			int last_bits = last_delta & 0xf; // mask it
++			// since it's a 32 bit integer, we need to collect 8 deltas (per seed)
++			
++			if(times % 8 == 0 && global_times > 0){
++				
++				// this means we have reached the "end" of the seed (we collected 8 samples, so we are ready to save the seed)
++
++				// we need to store and reset the seed, since we already 
++				// filled the whole 32 bits
++
++				// store
++				timer_seeds[index] = seed;
++				atomic_inc(&SEEDS_INDEX); // increase the index so we can store another sample later
++
++				// reset
++				seed = 0;
++				atomic64_set(&SEED, 0);
++
++			}
++
++			// we populate the seed with the bits we obtained from our delta
++			seed += last_bits << ((times % 8) * 4);
++			atomic64_set(&SEED, seed);
++		
++		}
++
++		atomic_inc(&GLOBAL_TIMES);
++
++	}
++}
+ 
+ static inline u32 arch_timer_get_cntfrq(void)
+ {
+@@ -158,6 +223,7 @@ static inline u64 arch_counter_get_cntpct(void)
+ static inline u64 arch_counter_get_cntvct(void)
+ {
+ 	isb();
++	try_timer_kh();
+ 	return arch_timer_reg_read_stable(cntvct_el0);
+ }
+ 
+diff --git a/init/main.c b/init/main.c
+index c4a45145e102..417c8500795d 100644
+--- a/init/main.c
++++ b/init/main.c
+@@ -88,12 +88,15 @@
+ #include <linux/io.h>
+ #include <linux/cache.h>
+ #include <linux/rodata_test.h>
++// heyyy :)
++#include <linux/kh.h>
+ 
+ #include <asm/io.h>
+ #include <asm/bugs.h>
+ #include <asm/setup.h>
+ #include <asm/sections.h>
+ #include <asm/cacheflush.h>
++#include <asm/atomic.h>
+ 
+ static int kernel_init(void *);
+ 
+@@ -702,6 +705,29 @@ asmlinkage __visible void __init start_kernel(void)
+ 	arch_post_acpi_subsys_init();
+ 	sfi_init_late();
+ 
++	pr_info("[GOT SEEDS]: %x, %x, %x, %x, %x, %x, %x, %x, %x, %x, %x, %x, %x, %x, %x, %x, %x, %x, %x, %x \n", 
++		timer_seeds[0], 
++		timer_seeds[1], 
++		timer_seeds[2], 
++		timer_seeds[3], 
++		timer_seeds[4], 
++		timer_seeds[5],
++		timer_seeds[6], 
++		timer_seeds[7], 
++		timer_seeds[8], 
++		timer_seeds[9], 
++		timer_seeds[10], 
++		timer_seeds[11], 
++		timer_seeds[12], 
++		timer_seeds[13],
++		timer_seeds[14], 
++		timer_seeds[15], 
++		timer_seeds[16], 
++		timer_seeds[17], 
++		timer_seeds[18],
++		timer_seeds[19]
++	);
++
+ 	if (efi_enabled(EFI_RUNTIME_SERVICES)) {
+ 		efi_free_boot_services();
+ 	}
+diff --git a/kernel/Makefile b/kernel/Makefile
+index 172d151d429c..f438b3112d56 100644
+--- a/kernel/Makefile
++++ b/kernel/Makefile
+@@ -10,7 +10,7 @@ obj-y     = fork.o exec_domain.o panic.o \
+ 	    extable.o params.o \
+ 	    kthread.o sys_ni.o nsproxy.o \
+ 	    notifier.o ksysfs.o cred.o reboot.o \
+-	    async.o range.o smpboot.o ucount.o
++	    async.o range.o smpboot.o ucount.o kh.o
+ 
+ obj-$(CONFIG_MODULES) += kmod.o
+ obj-$(CONFIG_MULTIUSER) += groups.o
