@@ -9,7 +9,7 @@ Please, read the `LICENSE.md` file.
 
 ## The project
 The scope of the project is to find exhaustive proof about entropy extraction from the system timer of a generic ARM system (at the time of writing, ARM is the only architecture targeted by this project). <br>
-The work has been done for the Kernel Hacking exam (Unimore) and is not complete, however, we believe it to be a good foundation for further studies.
+The work has been done for the Kernel Hacking exam (Unimore) and it is not complete, however, we believe it to be a good foundation for further studies.
 
 ## Theoretical review
 You can find more about the topic inside the `main.pdf` file. 
